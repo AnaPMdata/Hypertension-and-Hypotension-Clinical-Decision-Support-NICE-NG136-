@@ -1,0 +1,222 @@
+import streamlit as st
+
+# -------------------------
+#  Core logic (NICE)
+# -------------------------
+def classify_bp_abpm(sbp, dbp):      #def define a function
+    if sbp < 135 and dbp < 85:        #if conditional
+        return "Normal (<135/85)"
+    elif 135 <= sbp <= 149 or 85 <= dbp <= 94:
+        return "Stage 1 (135-149 / 85-94)"
+    else:
+        return "Stage 2 (≥150/95)"       #return shows how a function give back an answer
+
+
+def need_treatment(age, has_cvd, has_diabetes, has_ckd,
+                   target_organ_damage, ten_year_cvd_risk_10plus,
+                   clinic_sbp, clinic_dbp, abpm_sbp, abpm_dbp):
+    if clinic_sbp >= 180 or clinic_dbp >= 120:
+        return "Clinic ≥180/120: assess for target organ damage urgently; usually start drugs."
+
+    bp_class = classify_bp_abpm(abpm_sbp, abpm_dbp)
+
+    if "Stage 2" in bp_class:
+        return "Stage 2: offer lifestyle advice and start antihypertensive drugs."
+           
+    high_risk = any([has_cvd, has_diabetes, has_ckd, target_organ_damage, ten_year_cvd_risk_10plus])
+                #any if at least one of the risk factor is true
+    if "Stage 1" in bp_class:
+        if age < 80 and high_risk:
+            return "Stage 1 with additional risk: discuss and usually start drugs plus lifestyle advice."
+        elif age >= 80 and (clinic_sbp >= 150 or clinic_dbp >= 90):
+            return "Age ≥80 with clinic ≥150/90: consider drugs plus lifestyle advice."
+        else:
+            return "Stage 1, low risk: lifestyle advice; discuss pros/cons of starting drugs."
+
+    return "Normal ABPM/HBPM: no drug treatment for hypertension; check BP at least every 5 years."
+
+
+def simple_drug_choice(age, ethnicity, has_diabetes, current_meds, on_diuretic):
+           # encodes a simplified version of the nice drug algorithm
+    if current_meds == 0:  # Step 1
+        if has_diabetes:
+            return "Step 1 (Diabetes): ACEi or ARB first."
+        else:                           #ACEi - Angiotension- Converting Enzyme inhibitors
+            if ethnicity == "White":    #ARB - Anhiotensin-II receptor Blockers
+                if age < 55:
+                    return "Step 1 (White, <55): ACEi or ARB."
+                else:
+                    return "Step 1 (White, ≥55): CCB."  #CCB -Calcium Channel Blockers
+            elif ethnicity == "Black African/African Caribbean":
+                return "Step 1 (Black African/African Caribbean): CCB."
+            else:
+                return "Step 1 (Other/Mixed/Asian): ACEi/ARB or CCB."
+
+    elif current_meds == 1:  # Step 2
+        if on_diuretic:
+            return "Step 2 (already on diuretic): Add ACEi/ARB + CCB."
+        else:
+            return "Step 2: ACEi/ARB + CCB OR thiazide-like diuretic."
+
+    elif current_meds >= 2:  # Step 3
+        if on_diuretic:
+            return "Step 3 (on diuretic): ACEi/ARB + CCB + thiazide-like diuretic (triple therapy complete)."
+        else:
+            return "Step 3: Add thiazide-like diuretic to ACEi/ARB + CCB."
+
+    return "Review current treatment."
+
+
+def bp_targets(age):
+    if age < 80:
+        return "Target clinic BP <140/90 mmHg (ABPM/HBPM <135/85)."
+    else:
+        return "Target clinic BP <150/90 mmHg (ABPM/HBPM <145/85)."
+
+
+def lifestyle_advice():
+    return (
+        "Offer lifestyle advice: weight loss if needed, healthy diet, reduced salt, "
+        "regular physical activity, less alcohol, stop smoking, reduce caffeine."
+    )
+
+
+def assess_postural_hypotension(symptoms_postural, lying_sbp, standing_sbp):
+    if not symptoms_postural:
+        return "No symptoms suggesting postural hypotension selected."
+
+    sbp_drop = lying_sbp - standing_sbp  #calculate how much the SBP drops
+
+    if sbp_drop >= 20:
+        return (
+            f"Possible postural hypotension: systolic BP drops by {sbp_drop} mmHg on standing. "
+            "NICE-based action: consider likely causes including current medication, "
+            "manage appropriately, measure future BP standing, and consider treatment if symptoms persist."
+        )
+    else:
+        return (
+            f"Systolic BP drop is {sbp_drop} mmHg on standing. "
+            "If history is still suggestive (for example falls or postural dizziness), "
+            "repeat measurement carefully and consider further assessment."
+        )
+
+
+# -------------------------
+# Streamlit app
+# -------------------------
+def main():
+    st.set_page_config(page_title="Hypertension and Hypotension Clinical Decision Support", page_icon="🏥")
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background-color:#E6E6FA;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+    
+
+    st.title("🏥 Hypertension and Hypotension Clinical Decision Support (NICE NG136)")
+    st.caption(" Clinical decision support app based on NICE hypertension and hypotension guidance.")
+
+
+    st.markdown("---")
+
+    age = st.number_input("Age", 18, 110, 60)  #min, max, default
+    gender = st.selectbox("Gender", ["Male", "Female", "Other"])
+
+    st.markdown("### 🏨 Clinic blood pressure")
+    clinic_sbp = st.number_input(" Clinic SBP (mmHg)", 50, 260, 150)
+    clinic_dbp = st.number_input(" Clinic DBP (mmHg)", 30, 150, 95)
+
+    st.markdown("### 🏠 ABPM / HBPM daytime average")
+    abpm_sbp = st.number_input("ABPM/HBPM SBP (mmHg)", 70, 260, 145)
+    abpm_dbp = st.number_input("ABPM/HBPM DBP (mmHg)", 40, 150, 90)
+
+    st.markdown("### 🔴 Risk factors / comorbidities")  #the checkbox feed into need_treatment
+    has_cvd = st.checkbox("Established CVD")
+    has_diabetes = st.checkbox("Type 2 diabetes")
+    has_ckd = st.checkbox("Chronic kidney disease")
+    target_organ_damage = st.checkbox("Target organ damage")
+    ten_year_cvd_risk_10plus = st.checkbox("10-year CVD risk ≥10%")
+
+    #Etnicity is neede for drug choice logic NICE
+    st.markdown("### Ethnicity and 💊 current antihypertensive treatment")
+    ethnicity = st.selectbox(
+        "Ethnicity",
+        ["White", "Black African/African Caribbean", "Asian", "Mixed", "Other"]
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        current_meds = st.number_input("💊Total antihypertensive drugs", 0, 5, 0)
+    with col2:
+        on_diuretic = st.checkbox("💊On diuretic? (e.g. chlortalidone / indapamide)", value=False)
+
+    st.markdown("### Low BP / postural hypotension check")
+    symptoms_postural = st.checkbox("Symptoms of postural hypotension? (falls, dizziness on standing, postural dizziness)")
+
+    if symptoms_postural:
+        col3, col4 = st.columns(2)
+        with col3:
+            lying_sbp = st.number_input("Lying SBP (mmHg)", 50, 260, 120)
+        with col4:
+            standing_sbp = st.number_input("Standing SBP (mmHg)", 50, 260, 100)
+    else:
+        lying_sbp = 120    #if the user did not tick ymptoms, pretend the L and S BP are the same
+        standing_sbp = 120
+
+    if st.button("🟢 Get recommendation"):
+        st.subheader("Results")
+        if symptoms_postural:
+            low_bp_text = assess_postural_hypotension(symptoms_postural, lying_sbp, standing_sbp)
+            st.write(f"**Gender**: {gender}")
+            st.write(low_bp_text)
+
+            if clinic_sbp < 90 or clinic_dbp < 60:
+                st.warning("🚨 Low clinic BP reading detected.🚨 ")
+        else:
+            bp_class = classify_bp_abpm(abpm_sbp, abpm_dbp)
+            treat_text = need_treatment(
+                age, has_cvd, has_diabetes, has_ckd,
+                target_organ_damage, ten_year_cvd_risk_10plus,
+                clinic_sbp, clinic_dbp, abpm_sbp, abpm_dbp
+            )
+            drug_step = simple_drug_choice(age, ethnicity, has_diabetes, current_meds, on_diuretic)
+            targets = bp_targets(age)
+            lifestyle = lifestyle_advice()
+
+            st.write(f"**Gender**: {gender}")
+            st.write(f"**ABPM/HBPM classification**: {bp_class}")
+            st.write(f"**Treatment decision**: {treat_text}")
+            st.write(f"**Lifestyle**: {lifestyle}")
+
+            if "Stage 1" in bp_class or "Stage 2" in bp_class or clinic_sbp >= 180 or clinic_dbp >= 120:
+                st.write(f"**Drug recommendation**: {drug_step}")
+                st.write(f"**BP target**: {targets}")
+
+        if clinic_sbp >= 180 or clinic_dbp >= 120:
+            st.error("!!! 🚨Clinic ≥180/120 mmHg – urgent assessment needed!!!🚨")
+
+         # NICE links
+    st.markdown("### NICE quick links")
+    col_link1, col_link2 = st.columns(2)
+
+    with col_link1:
+        st.link_button(
+            "✅NICE NG136 Hypertension",
+            "https://www.nice.org.uk/guidance/ng136"
+        )
+
+    with col_link2:
+        st.link_button(
+            "✅NICE Low BP / Postural Hypotension",
+            "https://www.nice.org.uk/consultations/2003/2/methods"
+        )    
+if __name__ == "__main__":
+    main()
+
+#this is a standard Python boilerplate: means -if this file is run directly , then call main().
+#The Emoji is created with "windows key" and "." 
